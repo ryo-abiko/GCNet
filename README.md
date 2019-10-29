@@ -8,12 +8,18 @@ Single Image Reflection Removal based on GAN with Gradient Constraint
 
 The sample image is provided by [SIR<sup>2</sup> benchmark dataset](https://sir2data.github.io/).
 
+# Requirements
+Python
+- Pytorch (torch & torchvision)
+- numpy
+- skimage
+
 ## Usage
-Our code is based on Pytorch. Put input images into `images/<dataset_name>/input`. Processed images are saved in `images/<dataset_name>/output`. 
+Put input images into `images/<your_dataset_name>/input/`. Processed images are saved in `images/<your_dataset_name>/output/`. 
 
-If you have ground truth images, put them into `images/<dataset_name>/gt`. PSNR and SSIM will be calculated. The file name of ground truth images should match with those of input images.
+If you have ground truth images, put them into `images/<your_dataset_name>/gt/`. PSNR and SSIM will be calculated. The file name of ground truth images should match with those of input images.
 
-run `python3 demo.py`
+Run `python3 demo.py --dataset_name=<your_dataset_name>`.
 
 ## Citation
 Please cite this paper if you use this code. 
