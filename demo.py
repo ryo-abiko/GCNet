@@ -2,163 +2,112 @@
 import os
 import argparse
 import numpy as np
-import matplotlib.pyplot as plt
-import shutil
 from skimage.measure import compare_ssim, compare_psnr
 import torch
-import torch.nn as nn
-import torch.utils.data
 from PIL import Image
 
-from torchvision.utils import save_image, make_grid
 from torch.utils.data import DataLoader
-from torch.autograd import Variable
-from Util.util import *
+from Util.util import Interpolate, gridImage
+from GCNet_model import GCNet
+from Util.dataset import gtTestImageDataset, testImageDataset, mean, std
 
 def convert_to_numpy(input,H,W):
-    
-    return  input[:,:,:H,:W].clone().cpu().numpy().reshape(3,H,W).transpose(1,2,0)
+    input_numpy = input[:,:,:H,:W].clone().cpu().numpy().reshape(3,H,W).transpose(1,2,0)
+    for i in range(3):
+        input_numpy[:,:,i] = input_numpy[:,:,i] * std[i] + mean[i]
+
+    return  input_numpy
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--dataset_name", type=str, default="synthetic" , help="name of the dataset")
-parser.add_argument("--test_image", type=int, default=-1, help="test image number")
-parser.add_argument("--epoch", type=int, default=-1, help="model epochs")
-parser.add_argument("--train_name", type=str, default="test31", help="training name")
+parser.add_argument("--dataset_name", type=str, default="usrImg", help="name of folder")
 opt = parser.parse_args()
 
+# make output directory
+os.makedirs("images/" + opt.dataset_name + "/output", exist_ok=True)
 
-shutil.copyfile("models/models-" + opt.train_name  + ".py", "models.py")
-from models import GeneratorUNet
-from datasets1 import gtTestImageDataset
-from trained_generator.GCNet_model import GCNet
-
+# GPU or CPU
 if torch.cuda.is_available():
   device = 'cuda'
   torch.backends.cudnn.benchmark=True
 else:
   device = 'cpu'
 
-
 # Initialize generator
-preGenerator = GCNet().to(device)
-generator = GeneratorUNet().to(device)
-
-# Set generator to eval mode
-preGenerator.eval()
-generator.eval()
-
-
-# load preGenerator
-preGenerator.load_state_dict(torch.load( "trained_generator/GCNet_weight.pth"))
-
-# Set up function
-Norm = Normfunc()
-UnNorm = UnNormfunc()
-
-
-# load trained network model
-if opt.epoch > -1:
-    epc_list = [opt.epoch]
-else:
-    for i in range(210):
-        if os.path.exists("saved_models/"+opt.train_name +"/generator_"+str(i)+".pth") == False:
-            epc_list = range(i - 1)
-            break
-
+Generator = GCNet().to(device)
+Generator.eval()
+Generator.load_state_dict(torch.load("GCNet_weight.pth"))
 
 # read image
-image_dataset = gtTestImageDataset("../../image/test/testdata_reflection_" + opt.dataset_name)
-if opt.test_image > -1:
-    img_list = [opt.test_image]
+gtAvailable = False
+if os.path.exists("images/" + opt.dataset_name + "/gt"):
+    if len(os.listdir("images/" + opt.dataset_name + "/input")) == len(os.listdir("images/" + opt.dataset_name + "/gt")):
+        gtAvailable = True
+
+if gtAvailable:
+    image_dataset = gtTestImageDataset("images/" + opt.dataset_name)
 else:
-    img_list = range(len(image_dataset))
+    image_dataset = testImageDataset("images/" + opt.dataset_name)
 
-# Set parameters 
-Rmap_threshold = torch.tensor(0.6, device=device, requires_grad=False)
+# run
+all_psnr = 0.0
+all_ssim = 0.0
+print("[Dataset name: %s] --> %d images" % (opt.dataset_name, len(image_dataset)))
+for image_num in range(len(image_dataset)):
 
-# data for finding model
-bestPSNR = [[0,0,0],[0,0,0],[0,0,0],[0,0,0],[0,0,0]] # epoch, PSNR, SSIM
+    data = image_dataset[image_num]
+    R = data["R"].to(device)
 
-for epoch_num in epc_list:
-    print("[[ Epoch: %d / %d]]" % (epoch_num,len(epc_list)))
-    generator.load_state_dict(torch.load( "saved_models/"+opt.train_name+"/generator_"+str(epoch_num)+".pth"))
+    # Pad R for UNet
+    _,first_h,first_w = R.size()
+    R = torch.nn.functional.pad(R,(0,(R.size(2)//16)*16+16-R.size(2),0,(R.size(1)//16)*16+16-R.size(1)),"constant")
+    R = R.view(1,3,R.size(1),R.size(2))
 
-    all_psnr = 0.0
-    all_ssim = 0.0
-    for image_num in img_list:
+    # Rotate averaging
+    with torch.no_grad():
+        output  = ( Generator(R)
+                    + torch.rot90(Generator(torch.rot90(R,1,[2,3])),3,[2,3])
+                    + torch.rot90(Generator(torch.rot90(R,3,[2,3])),1,[2,3])
+                    + torch.rot90(Generator(torch.rot90(R,2,[2,3])),2,[2,3])
+        ) / 4
 
-        if opt.epoch > 0:
-            print("[[ Image: %d / %d]]" % (image_num,len(image_dataset)))
+    # Process the output image
+    output_np = np.clip(convert_to_numpy(output,first_h,first_w),0,1)
+    R_np = convert_to_numpy(R,first_h,first_w)
 
-        imgs = image_dataset[image_num]
-        RF = imgs["RF"].to(device)
-        B = imgs["B"]
-        _,first_h,first_w = RF.size()
-        RF = torch.nn.functional.pad(RF,(0,(RF.size(2)//16)*16+16-RF.size(2),0,(RF.size(1)//16)*16+16-RF.size(1)),"constant")
-            
-        opt.hr_height = RF.size(1)
-        opt.hr_width = RF.size(2)
-        RF = RF.view(1,3,opt.hr_height,opt.hr_width)
+    temp_img =  R_np - output_np
+    temp_img = temp_img[temp_img<0.0]
+    if temp_img.size/output_np.size > 0.0:
 
+        if temp_img.size/output_np.size > 0.4:
+            final_output = np.clip(output_np + (np.sum(temp_img) / temp_img.size* 1.4),0,1)
+        elif temp_img.size/output_np.size > 0.2:
+            final_output = np.clip(output_np + (np.sum(temp_img) / temp_img.size),0,1)
+        elif temp_img.size/output_np.size > 0.1:
+            final_output = np.clip(output_np + (np.sum(temp_img) / output._npsize),0,1)
+        else:
+            final_output = np.clip(output_np + 0.02,0,1)
 
-        with torch.no_grad():
-            # Generate Reliability map
-            GCNetOutput = UnNorm(preGenerator(Norm(RF)))
-            Rmap = torch.abs(RF - GCNetOutput)
-            maxNum = torch.max( Rmap )
-            #Rmap = torch.pow(1 - (Rmap / maxNum), 2).detach()
-            Rmap = torch.max(torch.pow(1 - (Rmap / maxNum), 2), Rmap_threshold).detach()
-            #Rmap = (1 - (Rmap / maxNum)).detach()
+        temp_img = (R_np - final_output) < 0.
+        final_output = final_output*(1-temp_img) + R_np*temp_img
+    else:
+        final_output = np.clip(output_np + 0.02,0,1)
 
-            # Generate second estimated image / output is normalized in range 0-1
-            input_tensor = torch.cat([ Norm(RF), Rmap, Norm((RF * Rmap)) ], 1)
-            if opt.epoch > -1:
-                output  = ( generator(input_tensor)[0]
-                            + torch.rot90(generator(torch.rot90(input_tensor,1,[2,3]))[0],3,[2,3])
-                            + torch.rot90(generator(torch.rot90(input_tensor,3,[2,3]))[0],1,[2,3])
-                            + torch.rot90(generator(torch.rot90(input_tensor,2,[2,3]))[0],2,[2,3])
-                ) / 4
+    # Save image
+    Image.fromarray(np.uint8(final_output * 255)).save("images/" + opt.dataset_name + "/output/" + data["Name"] + ".png")
 
-            else:
-                output  = generator(input)[0]
+    # Calculate PSNR/SSIM if available
+    if gtAvailable:
+        B = data["B"].astype(np.float32)
+        thisPSNR = compare_psnr(B, final_output.astype(np.float32))
+        thisSSIM = compare_ssim(B, final_output.astype(np.float32), multichannel=True)
+        all_psnr += thisPSNR
+        all_ssim += thisSSIM
+        print("[%s] PSNR:%4.2f SSIM:%4.3f" % (data["Name"], thisPSNR, thisSSIM))
 
-
-            
-        # process the output image
-        output = np.clip(convert_to_numpy(output,first_h,first_w),0,1)
-        RF = convert_to_numpy(RF,first_h,first_w)
-        #B = convert_to_numpy(B,first_h,first_w).astype(np.float32)
-
-
-        final_output = output.astype(np.float32)
-        final_psnr = compare_psnr(B, final_output)
-        final_ssim = compare_ssim(B, final_output, multichannel=True)
-
-        if opt.epoch > 0:
-            print("            final psnr               -->         %4.2f" % (final_psnr))
-        all_psnr += final_psnr
-        all_ssim += final_ssim
-
-    ave_PSNR = all_psnr/len(img_list)
-    ave_SSIM = all_ssim/len(img_list)
-    print("All dataset average PSNR: %4.2f" % (ave_PSNR))
-    print("All dataset average SSIM: %4.3f" % (ave_SSIM))
-
-    # ranking
-    for i in range(5):
-        if bestPSNR[i][1] <  ave_PSNR:
-            bestPSNR.insert(i,[epoch_num, ave_PSNR, ave_SSIM])
-            bestPSNR = bestPSNR[:5]
-            break
-
-
-print("            [[[[[[[[[[[  final result  %s  %s]]]]]]]]]]]" % (opt.train_name, opt.dataset_name))
-for i in range(5):
-    if bestPSNR[i][1] > 0:
-        print( "[%d] epoch:%d  PSNR: %4.2f SSIM: %4.3f" % (i, bestPSNR[i][0], bestPSNR[i][1], bestPSNR[i][2]) )
-
-if opt.test_image > 0:
-    plt.figure(1).clear()
-    plt.imshow(np.concatenate( [RF,output,B],1 ))
-    plt.title(opt.train_name + " / " + str(opt.epoch) + "epochs")
-    plt.show()
+if gtAvailable:
+    all_psnr = all_psnr/len(image_dataset)
+    all_ssim = all_ssim/len(image_dataset)
+    print("[[[[[[[[%s]]]]]]]]" % (opt.dataset_name))
+    print("PSNR: %4.2f / SSIM: %4.3f" % (all_psnr, all_ssim))
+else:
+    print("Complete.")

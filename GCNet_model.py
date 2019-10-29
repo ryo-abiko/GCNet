@@ -1,8 +1,6 @@
 import torch.nn as nn
-import torch as torch
+import torch
 from torchvision.models import vgg19
-import math
-import numpy as np
 
 
 class GCVGGBlock(nn.Module):
@@ -109,6 +107,6 @@ class GCNet(nn.Module):
         x1_3 = self.conv1_3(torch.cat([x1_0, x1_1, x1_2, self.up(x2_2)], 1))
         x0_4 = self.conv0_4(torch.cat([x0_0, x0_1, x0_2, x0_3, self.up(x1_3)], 1))
 
-
         output4 = self.final4(x0_4)
+
         return output4

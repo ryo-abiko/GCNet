@@ -11,7 +11,7 @@ Single Image Reflection Removal based on GAN with Gradient Constraint
 The sample image is provided by [SIR<sup>2</sup> benchmark dataset](https://sir2data.github.io/).
 
 ## Usage
-Our code is based on pytorch. Put input images into `input_images`. Processed images are 
+Our code is based on pytorch. Put input images into `input_images`. Processed images are saved in `output_images`.
 
 run `python3 demo.py`
 
