@@ -13,6 +13,7 @@ Python
 - Pytorch (torch & torchvision)
 - numpy
 - skimage
+- tqdm
 
 ## Usage
 Put input images into `images/<your_dataset_name>/input/`. Processed images are saved in `images/<your_dataset_name>/output/`. 
