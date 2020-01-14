@@ -1,13 +1,14 @@
 import torch.nn as nn
 import torch
 from torchvision.models import vgg19
+from Util.util import Interpolate
 
 
 class GCVGGBlock(nn.Module):
     def __init__(self, in_channels, middle_channels, out_channels, act_func=nn.LeakyReLU(negative_slope=0.01,inplace=True)):
         super(GCVGGBlock, self).__init__()
         self.model = nn.Sequential(
-            nn.Conv2d(in_channels, middle_channels, 3, padding=1),
+            nn.Conv2d(in_channels, middle_channels, 3, padd ing=1),
             nn.BatchNorm2d(middle_channels),
             act_func,
             nn.Conv2d(middle_channels, out_channels, 3, padding=1),
@@ -21,17 +22,6 @@ class GCVGGBlock(nn.Module):
 
         return out
 
-class GCInterpolate(nn.Module):
-    def __init__(self, scale_factor, mode):
-        super(GCInterpolate, self).__init__()
-        self.interp = nn.functional.interpolate
-        self.scale_factor = scale_factor
-        self.mode = mode
-        
-    def forward(self, x):
-        x = self.interp(x, scale_factor=self.scale_factor, mode=self.mode, align_corners=True)
-        return x
-
 
 class GCNet(nn.Module):
     def __init__(self, in_channels=3, out_channels=3, n_residual_blocks=16):
@@ -41,7 +31,7 @@ class GCNet(nn.Module):
 
         self.pool = nn.MaxPool2d(2, 2)
         #self.up = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
-        self.up = GCInterpolate(scale_factor=2, mode='bilinear')
+        self.up = Interpolate(scale_factor=2, mode='bilinear')
 
         self.conv0_0 = GCVGGBlock(in_channels, nb_filter[0], nb_filter[0])
         self.conv1_0 = GCVGGBlock(nb_filter[0], nb_filter[1], nb_filter[1])
