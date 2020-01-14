@@ -8,7 +8,7 @@ class GCVGGBlock(nn.Module):
     def __init__(self, in_channels, middle_channels, out_channels, act_func=nn.LeakyReLU(negative_slope=0.01,inplace=True)):
         super(GCVGGBlock, self).__init__()
         self.model = nn.Sequential(
-            nn.Conv2d(in_channels, middle_channels, 3, padd ing=1),
+            nn.Conv2d(in_channels, middle_channels, 3, padding=1),
             nn.BatchNorm2d(middle_channels),
             act_func,
             nn.Conv2d(middle_channels, out_channels, 3, padding=1),
