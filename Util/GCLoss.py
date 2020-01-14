@@ -1,8 +1,15 @@
-"""
+"""  Usage
+net = generator()
+GCnet = GCLoss()
+criterion_edge_corr = torch.nn.L1Loss()
+loss_edge_sum = torch.nn.L1Loss()
+
 B, R = net(Input)
+gradB, gradR = GCLoss(B, R)
+loss_edge_corr = criterion_edge_corr(gradB * gradR, 0)
+loss_edge_sum = criterion_edge_sum(gradB + gradR, imgs_grad_label)
+loss_edge = (epoch - 1) * (loss_edge_sum + loss_edge_corr)
 """
-
-
 
 import torch.nn as nn
 
